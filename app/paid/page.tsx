@@ -98,6 +98,7 @@ export default function PaidSubscribersPage() {
   const [selectedSite, setSelectedSite] = useState<string>('all')
 
   const fetchData = async (forceRefresh = false) => {
+    setLoading(true)
     try {
       const url = '/api/dashboard/paid/daily'
       const cacheKey = 'paid_dashboard_data'
@@ -235,7 +236,7 @@ export default function PaidSubscribersPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto max-w-6xl p-6 lg:p-10">
+      <div className="container mx-auto max-w-9xl p-6 lg:p-10">
         <div className="mb-10 flex items-start justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">Subscribers</p>

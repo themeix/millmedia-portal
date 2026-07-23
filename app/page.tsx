@@ -60,6 +60,24 @@ interface DashboardData {
   timestamp: string
 }
 
+type DashboardCacheEntry = { data: DashboardData; ts: number }
+
+const CACHE_DURATION = 24 * 60 * 60 * 1000
+
+function loadCache(key: string): DashboardCacheEntry | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed.ts === 'number' && parsed.data) {
+        return parsed as DashboardCacheEntry
+      }
+    }
+  } catch {}
+  return null
+}
+
 // Ink + single accent. Everything else stays grayscale so the accent
 // carries the whole point of emphasis, rather than competing colors.
 const INK = '#18181B'
@@ -90,8 +108,8 @@ function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
 }
 
 export default function Home() {
-  const [freeData, setFreeData] = useState<DashboardData | null>(null)
-  const [paidData, setPaidData] = useState<DashboardData | null>(null)
+  const [freeData, setFreeData] = useState<DashboardData | null>(loadCache('free_dashboard_data')?.data ?? null)
+  const [paidData, setPaidData] = useState<DashboardData | null>(loadCache('paid_dashboard_data')?.data ?? null)
   const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [selectedSite, setSelectedSite] = useState<string>('all')
@@ -101,21 +119,12 @@ export default function Home() {
     try {
       const freeCacheKey = 'free_dashboard_data'
       const paidCacheKey = 'paid_dashboard_data'
-      const cacheDuration = 24 * 60 * 60 * 1000
 
       const loadFromCacheOrFetch = async (cacheKey: string, url: string) => {
         if (!forceRefresh) {
-          const cached = localStorage.getItem(cacheKey)
-          if (cached) {
-            try {
-              const parsedCache = JSON.parse(cached)
-              const age = Date.now() - parsedCache.ts
-              if (age < cacheDuration) {
-                return parsedCache.data as DashboardData
-              }
-            } catch (e) {
-              localStorage.removeItem(cacheKey)
-            }
+          const cached = loadCache(cacheKey)
+          if (cached && (Date.now() - cached.ts < CACHE_DURATION)) {
+            return cached.data
           }
         }
 
@@ -128,7 +137,7 @@ export default function Home() {
           data: result,
           ts: Date.now()
         }))
-        return result as DashboardData
+        return result
       }
 
       const [free, paid] = await Promise.all([
@@ -206,36 +215,24 @@ export default function Home() {
     const loadCachedData = async () => {
       const freeCacheKey = 'free_dashboard_data'
       const paidCacheKey = 'paid_dashboard_data'
-      const cacheDuration = 24 * 60 * 60 * 1000
-
-      const loadCache = async (cacheKey: string, setter: (data: DashboardData) => void) => {
-        const cached = localStorage.getItem(cacheKey)
-        if (cached) {
-          try {
-            const obj = JSON.parse(cached)
-            const age = Date.now() - obj.ts
-            if (age < cacheDuration) {
-              setter(obj.data)
-              return true
-            }
-          } catch (e) {
-            localStorage.removeItem(cacheKey)
-          }
-        }
-        return false
-      }
 
       const [freeCached, paidCached] = await Promise.all([
-        loadCache(freeCacheKey, setFreeData),
-        loadCache(paidCacheKey, setPaidData)
+        loadCache(freeCacheKey),
+        loadCache(paidCacheKey)
       ])
 
-      if (!freeCached || !paidCached) {
-        await fetchData()
-      } else {
-        setLastRefreshed(new Date())
+      const freeFresh = freeCached && (Date.now() - freeCached.ts < CACHE_DURATION)
+      const paidFresh = paidCached && (Date.now() - paidCached.ts < CACHE_DURATION)
+
+      if (freeFresh && paidFresh) {
+        setFreeData(freeCached.data)
+        setPaidData(paidCached.data)
+        setLastRefreshed(new Date(Math.max(freeCached.ts, paidCached.ts)))
         setLoading(false)
+        return
       }
+
+      await fetchData()
     }
 
     loadCachedData()
@@ -255,7 +252,7 @@ export default function Home() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto max-w-6xl p-6 lg:p-10">
+      <div className="container mx-auto max-w-9xl p-6 lg:p-10">
         {/* Header */}
         <div className="mb-10 flex items-start justify-between">
           <div>

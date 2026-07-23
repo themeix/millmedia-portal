@@ -18,20 +18,32 @@ interface AdminData {
   freeCount: number
 }
 
-const LS_KEY = 'publication_targets'
+type AdminCacheEntry = { data: AdminData; ts: number }
 
-function loadLocal() {
+const LS_KEY = 'publication_targets'
+const CACHE_DURATION = 24 * 60 * 60 * 1000
+
+function loadCache(): AdminCacheEntry | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = window.localStorage.getItem(LS_KEY)
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed.ts === 'number' && parsed.data) {
+        return parsed as AdminCacheEntry
+      }
+    }
   } catch {}
   return null
 }
 
+function loadLocalData(): AdminData | null {
+  return loadCache()?.data ?? null
+}
+
 export default function AdminPage() {
-  const [data, setData] = useState<AdminData>({
-    targets: loadLocal() || [],
+  const [data, setData] = useState<AdminData>(loadLocalData() || {
+    targets: [],
     paidCount: 0,
     freeCount: 0
   })
@@ -41,9 +53,19 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setLoading(true)
     try {
+      if (!forceRefresh) {
+        const cached = loadCache()
+        if (cached && (Date.now() - cached.ts < CACHE_DURATION)) {
+          setData(cached.data)
+          setLastRefreshed(new Date(cached.ts))
+          setError(null)
+          return
+        }
+      }
+
       const res = await fetch('/api/admin/targets')
       const result = await res.json()
       const targets = result?.targets || []
@@ -52,7 +74,11 @@ export default function AdminPage() {
       } else {
         setError(null)
       }
-      setData((prev) => ({ ...prev, targets }))
+      setData((prev) => {
+        const newData = { ...prev, targets }
+        localStorage.setItem(LS_KEY, JSON.stringify({ data: newData, ts: Date.now() }))
+        return newData
+      })
       setLastRefreshed(new Date())
     } catch {
       setError('Failed to load target settings')
@@ -62,7 +88,7 @@ export default function AdminPage() {
   }
 
   const handleRefresh = async () => {
-    await fetchData()
+    await fetchData(true)
   }
 
   const handleSave = async () => {
@@ -93,7 +119,11 @@ export default function AdminPage() {
         body: JSON.stringify({ targets })
       })
       const result = await res.json()
-      setData((prev) => ({ ...prev, targets: result?.targets || targets }))
+      setData((prev) => {
+        const newData = { ...prev, targets: result?.targets || targets }
+        localStorage.setItem(LS_KEY, JSON.stringify({ data: newData, ts: Date.now() }))
+        return newData
+      })
       setEditing({})
     } finally {
       setSaving(false)
@@ -101,12 +131,22 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    fetchData()
+    const init = async () => {
+      const cached = loadCache()
+      if (cached && (Date.now() - cached.ts < CACHE_DURATION)) {
+        setData(cached.data)
+        setLastRefreshed(new Date(cached.ts))
+        setLoading(false)
+        return
+      }
+      await fetchData()
+    }
+    init()
   }, [])
 
   const getTargetForSite = (siteId: number, metricType: string) => {
-    const local = loadLocal()
-    return local?.find((t: any) => t.site_id === siteId && t.metric_type === metricType) || data.targets.find((t) => t.site_id === siteId && t.metric_type === metricType)
+    const cachedTargets = loadCache()?.data?.targets
+    return cachedTargets?.find((t: any) => t.site_id === siteId && t.metric_type === metricType) || data.targets.find((t: any) => t.site_id === siteId && t.metric_type === metricType)
   }
 
   if (loading && data.targets.length === 0) {
@@ -133,7 +173,7 @@ export default function AdminPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto max-w-6xl p-6 lg:p-10">
+      <div className="container mx-auto max-w-9xl p-6 lg:p-10">
         <div className="mb-10 flex items-start justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">Settings</p>
