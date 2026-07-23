@@ -96,11 +96,27 @@ export async function GET() {
             .gte('created_at', last30.toISOString())
         ])
 
+        const { data: targetRow, error: targetError } = await supabase
+          .from('publication_targets')
+          .select('target_value')
+          .eq('site_id', pub.siteId)
+          .eq('metric_type', 'free')
+          .maybeSingle()
+
+        if (targetError) {
+          console.error('Free target query error:', targetError)
+        }
+
+        const target = targetRow?.target_value ?? pub.target
+        if (!targetRow) {
+          console.warn('Free target missing in DB for site_id=', pub.siteId, 'falling back to', target)
+        }
+
         return {
           siteId: pub.siteId,
           name: pub.name,
           domain: pub.domain,
-          target: pub.target,
+          target,
           current: currentTotal || 0,
           newThisMonth: newThisMonth || 0,
           last30Days: last30Days || 0

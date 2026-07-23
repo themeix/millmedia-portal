@@ -2,12 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, Users, Settings, LayoutDashboard, TrendingUp, Shield } from 'lucide-react'
+import { BarChart3, Users, Settings, LayoutDashboard, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Paid Subscribers', href: '/', icon: BarChart3 },
+  { name: 'Paid Subscribers', href: '/paid', icon: BarChart3 },
   { name: 'Free Subscribers', href: '/free', icon: Users },
   { name: 'Admin', href: '/admin', icon: Settings },
 ]
@@ -20,17 +20,18 @@ export default function DashboardLayout({
   const pathname = usePathname()
 
   return (
-    <div className="min-h-screen bg-background">
-      <aside className="fixed left-0 top-0 z-10 h-screen w-64 border-r bg-background">
-        <div className="flex h-16 items-center justify-center border-b">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <TrendingUp className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <h1 className="text-xl font-bold text-foreground">Mill Media</h1>
+    <div className="min-h-screen bg-zinc-50">
+      <aside className="fixed left-0 top-0 z-10 h-screen w-60 border-r border-zinc-200 bg-white">
+        {/* Wordmark — plain ink monogram instead of a gradient tile */}
+        <div className="flex h-16 items-center gap-2.5 border-b border-zinc-200 px-5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-900">
+            <TrendingUp className="h-4 w-4 text-white" strokeWidth={2} />
           </div>
+          <span className="text-[15px] font-semibold tracking-tight text-zinc-900">Mill Media</span>
         </div>
-        <nav className="p-4 space-y-1">
+
+        {/* Nav — active state is a quiet tint + accent rule, not a solid filled button */}
+        <nav className="space-y-0.5 p-3">
           {navigation.map((item) => {
             const isActive = pathname === item.href
             return (
@@ -38,46 +39,47 @@ export default function DashboardLayout({
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                  'relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                   isActive
-                    ? "bg-primary text-primary-foreground shadow-md"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'
                 )}
               >
-                <item.icon className="h-5 w-5" />
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-indigo-600" />
+                )}
+                <item.icon className="h-4 w-4" strokeWidth={2} />
                 <span>{item.name}</span>
               </Link>
             )
           })}
         </nav>
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t">
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center">
-              <Shield className="h-4 w-4 text-primary" />
+
+        {/* Status — plain dot instead of a colored icon badge */}
+        <div className="absolute bottom-0 left-0 right-0 border-t border-zinc-200 p-4">
+          <div className="flex items-center gap-2.5 px-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-zinc-700">Data status</p>
+              <p className="truncate text-xs text-zinc-400">24h cache enabled</p>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">System Status</p>
-              <p className="text-xs text-muted-foreground">All systems operational</p>
-            </div>
-            <div className="h-2 w-2 rounded-full bg-green-500" />
           </div>
         </div>
       </aside>
-      <main className="ml-64">
-        <div className="h-16 border-b bg-background/50 backdrop-blur-sm sticky top-0 z-5">
-          <div className="h-full px-6 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+
+      <main className="ml-60">
+        <div className="sticky top-0 z-[5] h-16 border-b border-zinc-200 bg-white/80 backdrop-blur-sm">
+          <div className="flex h-full items-center justify-between px-6">
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
               <span>Mill Media Analytics</span>
               <span>/</span>
-              <span className="text-foreground font-medium">
+              <span className="font-medium text-zinc-900">
                 {pathname === '/' ? 'Dashboard' : pathname.slice(1).charAt(0).toUpperCase() + pathname.slice(2)}
               </span>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-sm">
-                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-muted-foreground">Live</span>
-              </div>
+            <div className="flex items-center gap-2 text-sm text-zinc-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span>Live</span>
             </div>
           </div>
         </div>

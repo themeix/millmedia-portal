@@ -1,13 +1,22 @@
 'use client'
 
 import DashboardLayout from '@/components/dashboard-layout'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { TrendingUp, Users, Target, Calendar, Loader2, BarChart3, Activity, Zap, ArrowUp, ArrowDown } from 'lucide-react'
+import { Loader2, Users, Activity } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, Legend } from 'recharts'
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  AreaChart,
+  Area,
+} from 'recharts'
 import RefreshButton from '@/components/refresh-button'
 
 interface Publication {
@@ -59,6 +68,28 @@ interface DashboardData {
   timestamp: string
 }
 
+const NEUTRAL = '#A1A1AA'
+
+function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
+  if (!data || data.length === 0) {
+    return <div className="h-9 w-24" />
+  }
+  return (
+    <ResponsiveContainer width={96} height={36}>
+      <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+        <Line
+          type="monotone"
+          dataKey="actual"
+          stroke={color}
+          strokeWidth={1.75}
+          dot={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
 export default function FreeSubscribersPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -67,46 +98,41 @@ export default function FreeSubscribersPage() {
   const [selectedSite, setSelectedSite] = useState<string>('all')
 
   const fetchData = async (forceRefresh = false) => {
-    setLoading(true)
     try {
       const url = '/api/dashboard/free/daily'
       const cacheKey = 'free_dashboard_data'
-      const cacheDuration = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+      const cacheDuration = 24 * 60 * 60 * 1000
 
-      if (!forceRefresh) {
-        const cached = localStorage.getItem(cacheKey)
-        if (cached) {
-          try {
-            const parsedCache = JSON.parse(cached)
-            const age = Date.now() - parsedCache.ts
-            
-            if (age < cacheDuration) {
-              setData(parsedCache.data as DashboardData)
-              setLastRefreshed(new Date(parsedCache.ts))
-              setLoading(false)
-              return
-            } else {
-              localStorage.removeItem(cacheKey)
+      const loadFromCacheOrFetch = async (ck: string, u: string) => {
+        if (!forceRefresh) {
+          const cached = localStorage.getItem(ck)
+          if (cached) {
+            try {
+              const parsedCache = JSON.parse(cached)
+              const age = Date.now() - parsedCache.ts
+              if (age < cacheDuration) {
+                return parsedCache.data as DashboardData
+              }
+            } catch (e) {
+              localStorage.removeItem(ck)
             }
-          } catch (e) {
-            localStorage.removeItem(cacheKey)
           }
         }
+
+        const response = await fetch(u)
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const result = await response.json()
+        localStorage.setItem(ck, JSON.stringify({
+          data: result,
+          ts: Date.now()
+        }))
+        return result as DashboardData
       }
 
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const result = await response.json()
-      
-      localStorage.setItem(cacheKey, JSON.stringify({
-        data: result,
-        ts: Date.now()
-      }))
-      
-      setData(result as DashboardData)
+      const result = await loadFromCacheOrFetch(cacheKey, url)
+      setData(result)
       setLastRefreshed(new Date())
       setError(null)
     } catch (err) {
@@ -117,21 +143,11 @@ export default function FreeSubscribersPage() {
   }
 
   const handleRefresh = async () => {
-    localStorage.removeItem('free_dashboard_data');
+    localStorage.removeItem('free_dashboard_data')
     await fetchData(true)
   }
 
-  const calculateProgress = (current: number, target: number) => {
-    if (target === 0) return 0
-    return Math.min((current / target) * 100, 100)
-  }
-
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-
-  const formatWeek = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
@@ -159,36 +175,43 @@ export default function FreeSubscribersPage() {
     selectedSite !== 'all' && p.siteId === Number(selectedSite)
   )
 
+  const toNumber = (value: string | number | undefined) => {
+    if (value === undefined || value === null) return 0
+    const parsed = typeof value === 'number' ? value : Number(String(value).replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(parsed) ? parsed : 0
+  }
 
+  const totalCurrent = toNumber(data?.summary.current)
+  const totalGrowth = toNumber(data?.summary.growth)
 
   useEffect(() => {
     const checkCache = async () => {
-      const cached = localStorage.getItem('free_dashboard_data');
+      const cached = localStorage.getItem('free_dashboard_data')
       if (cached) {
         try {
-          const obj = JSON.parse(cached);
-          const age = Date.now() - obj.ts;
-          const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
+          const obj = JSON.parse(cached)
+          const age = Date.now() - obj.ts
+          const cacheDuration = 24 * 60 * 60 * 1000
           
           if (age < cacheDuration) {
-            setData(obj.data);
-            setLastRefreshed(new Date(obj.ts));
-            setLoading(false);
-            return;
+            setData(obj.data)
+            setLastRefreshed(new Date(obj.ts))
+            setLoading(false)
+            return
           } else {
-            localStorage.removeItem('free_dashboard_data');
+            localStorage.removeItem('free_dashboard_data')
           }
         } catch (e) {
-          localStorage.removeItem('free_dashboard_data');
+          localStorage.removeItem('free_dashboard_data')
         }
       }
       
-      await fetchData();
-    };
-    checkCache();
+      await fetchData()
+    }
+    checkCache()
   }, [])
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <DashboardLayout>
         <div className="container mx-auto p-6">
@@ -212,206 +235,183 @@ export default function FreeSubscribersPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6">
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-3xl font-bold tracking-tight">Free Subscribers</h1>
-          <RefreshButton 
+      <div className="container mx-auto max-w-6xl p-6 lg:p-10">
+        <div className="mb-10 flex items-start justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">Subscribers</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Free Subscribers</h1>
+          </div>
+          <RefreshButton
             onRefresh={handleRefresh}
             isLoading={loading}
             lastRefreshed={lastRefreshed}
             cacheAge={lastRefreshed ? Math.floor((Date.now() - lastRefreshed.getTime()) / 60000) : -1}
           />
-          </div>
-          <p className="text-muted-foreground mt-1">Subscriber growth and publication performance</p>
         </div>
-        
-        <Tabs defaultValue="growth" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="growth">Growth Chart</TabsTrigger>
-            <TabsTrigger value="publications">Publications</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="growth" className="space-y-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4 flex-1">
-                <Select value={selectedSite} onValueChange={setSelectedSite}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Select a site">
-                      {selectedSite === 'all' ? 'All Sites' : selectedPub?.name || 'Select a site'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sites</SelectItem>
-                    {data.publications.map((pub) => (
-                  <SelectItem key={String(pub.siteId)} value={String(pub.siteId)}>
-                      {pub.name}
-                    </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedSite !== 'all' && selectedPub && (
-                  <Badge variant="outline" className="text-base py-1 px-3">
-                    {selectedPub.name}
-                  </Badge>
-                )}
-              </div>
-            </div>
-            
-            <div className="mb-6 p-4 bg-muted/50 rounded-lg">
-              <h2 className="text-xl font-semibold mb-2">
-                {selectedSite === 'all' ? 'All Sites Growth Dashboard' : `${selectedPub?.name} Growth Dashboard`}
-              </h2>
-              <p className="text-muted-foreground">
-                {selectedSite === 'all' 
-                  ? 'Viewing subscriber growth across all publications' 
-                  : `Viewing subscriber growth for ${selectedPub?.name} (${selectedPub?.domain})`
-                }
+
+        <div className="mb-12 grid grid-cols-1 divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">Total</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                {selectedSite === 'all' ? data.summary.current : (selectedPub?.current ?? 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-zinc-500">
+                +{selectedSite === 'all' ? data.summary.growth : (selectedPub?.newThisMonth ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
               </p>
             </div>
-            
-            <div className="grid gap-6 md:grid-cols-3">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Subscribers</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {selectedSite === 'all' 
-                      ? data.summary.current 
-                      : (selectedPub?.current || 0).toLocaleString()
-                    }
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Activity className="h-3 w-3 text-green-500" />
-                    <span>+{selectedSite === 'all' 
-                      ? data.summary.growth 
-                      : (selectedPub?.newThisMonth || 0).toLocaleString()
-                    } this month</span>
-                  </div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Growth Rate</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {selectedSite === 'all' 
-                      ? data.summary.growthRate 
-                      : (selectedPub?.current || 0) > 0 
-                        ? ((selectedPub?.newThisMonth || 0) / (selectedPub?.current || 1) * 100).toFixed(1)
-                        : '0'
-                    }%
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Calendar className="h-3 w-3" />
-                    <span>Based on last 30 days</span>
-                  </div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Data Range</CardTitle>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">30 days</div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Calendar className="h-3 w-3" />
-                    <span>{data.summary.dateRange}</span>
-                  </div>
-                </CardContent>
-              </Card>
+            <Sparkline data={timeSeries.dailyData} color={NEUTRAL} />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">New This Month</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                +{selectedSite === 'all' 
+                  ? data?.publications.reduce((sum, pub) => sum + (pub.newThisMonth || 0), 0).toLocaleString()
+                  : (selectedPub?.newThisMonth ?? 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-zinc-500">
+                <span className="text-zinc-400">{selectedSite === 'all' ? 'All sites' : selectedPub?.name || 'All sites'}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">30-Day Growth</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                +{selectedSite === 'all' ? totalGrowth : (selectedPub?.last30Days ?? 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-zinc-500">
+                {selectedSite === 'all' ? data.summary.growthRate : ((selectedPub?.current || 0) > 0 ? ((selectedPub?.newThisMonth || 0) / (selectedPub?.current || 1) * 100).toFixed(1) : '0')}% <span className="text-zinc-400">growth rate</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Tabs defaultValue="growth" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="growth">Growth</TabsTrigger>
+            <TabsTrigger value="publications">Publications</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="growth" className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-zinc-900">
+                  {selectedSite === 'all' ? 'All sites' : selectedPub?.name}
+                </h2>
+                <p className="text-sm text-zinc-500">
+                  {selectedSite === 'all'
+                    ? 'Combined daily growth across every publication'
+                    : `${selectedPub?.domain}`}
+                </p>
+              </div>
+              <Select value={selectedSite} onValueChange={setSelectedSite}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Select a site" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sites</SelectItem>
+                  {data.publications.map((pub) => (
+                    <SelectItem key={String(pub.siteId)} value={String(pub.siteId)}>
+                      {pub.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    Daily Growth Chart - {selectedSite === 'all' ? 'All Sites' : selectedPub?.name}
-                  </CardTitle>
-                  <CardDescription>
-                    {selectedSite === 'all' ? 'All sites' : selectedPub?.name} - Subscriber growth over the last 30 days
-                  </CardDescription>
+              <Card className="border-zinc-200 shadow-none">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-zinc-500">Daily growth</CardTitle>
+                  <CardDescription className="text-xs">New free subscribers, last 30 days</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={260}>
                     <AreaChart data={timeSeries.dailyData}>
                       <defs>
-                        <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                        <linearGradient id="colorFreeGrowth" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={NEUTRAL} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={NEUTRAL} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="date" 
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="date"
                         tickFormatter={formatDate}
-                        className="text-xs"
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
                       />
-                      <YAxis 
+                      <YAxis
                         tickFormatter={(value) => value.toLocaleString()}
-                        className="text-xs"
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
                       />
-                      <Tooltip 
+                      <Tooltip
                         labelFormatter={formatFullDate}
-                        formatter={(value: number) => [value.toLocaleString(), 'New Subscribers']}
+                        formatter={(value: number) => [value.toLocaleString(), 'New free']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
                       />
-                      <Area 
-                        type="monotone" 
-                        dataKey="actual" 
-                        stroke="#8b5cf6" 
+                      <Area
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={NEUTRAL}
+                        strokeWidth={1.75}
                         fillOpacity={1}
-                        fill="url(#colorGrowth)"
+                        fill="url(#colorFreeGrowth)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    Weekly Growth Chart - {selectedSite === 'all' ? 'All Sites' : selectedPub?.name}
-                  </CardTitle>
-                  <CardDescription>
-                    {selectedSite === 'all' ? 'All sites' : selectedPub?.name} - Subscriber growth by week
-                  </CardDescription>
+              <Card className="border-zinc-200 shadow-none">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-zinc-500">Weekly growth</CardTitle>
+                  <CardDescription className="text-xs">New free subscribers by week</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={260}>
                     <LineChart data={timeSeries.weeklyData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="weekStart" 
-                        tickFormatter={formatWeek}
-                        className="text-xs"
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="weekStart"
+                        tickFormatter={formatDate}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
                       />
-                      <YAxis 
+                      <YAxis
                         tickFormatter={(value) => value.toLocaleString()}
-                        className="text-xs"
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
                       />
-                      <Tooltip 
+                      <Tooltip
                         labelFormatter={(value) => {
-                          const item = timeSeries.weeklyData?.find((d: any) => d.weekStart === value)
+                          const item = (timeSeries.weeklyData || []).find((d: any) => d.weekStart === value)
                           if (item) {
                             return `${formatFullDate(item.weekStart)} - ${formatFullDate(item.weekEnd)}`
                           }
                           return value
                         }}
-                        formatter={(value: number) => [value.toLocaleString(), 'Weekly Growth']}
+                        formatter={(value: number) => [value.toLocaleString(), 'Weekly growth']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
                       />
-                      <Line 
-                        type="monotone" 
-                        dataKey="actual" 
-                        stroke="#8b5cf6" 
-                        strokeWidth={2}
-                        dot={{ r: 4 }}
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={NEUTRAL}
+                        strokeWidth={1.75}
+                        dot={{ r: 3 }}
+                        isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -419,39 +419,42 @@ export default function FreeSubscribersPage() {
               </Card>
             </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Growth Trend Analysis - {selectedSite === 'all' ? 'All Sites' : selectedPub?.name}
-                </CardTitle>
-                <CardDescription>
-                  {selectedSite === 'all' ? 'All sites' : selectedPub?.name} - Detailed breakdown of subscriber patterns
-                </CardDescription>
+            <Card className="border-zinc-200 shadow-none">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-500">Growth trend</CardTitle>
+                <CardDescription className="text-xs">Daily free subscriber patterns, last 30 days</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={400}>
+                <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={timeSeries.dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="date" 
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                    <XAxis
+                      dataKey="date"
                       tickFormatter={formatDate}
-                      className="text-xs"
+                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                      axisLine={false}
+                      tickLine={false}
                     />
-                    <YAxis 
+                    <YAxis
                       tickFormatter={(value) => value.toLocaleString()}
-                      className="text-xs"
+                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={40}
                     />
-                    <Tooltip 
+                    <Tooltip
                       labelFormatter={formatFullDate}
-                      formatter={(value: number) => [value.toLocaleString(), 'New Subscribers']}
+                      formatter={(value: number) => [value.toLocaleString(), 'New free']}
+                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="actual" 
-                      stroke="#8b5cf6" 
-                      strokeWidth={2}
+                    <Line
+                      type="monotone"
+                      dataKey="actual"
+                      stroke={NEUTRAL}
+                      strokeWidth={1.75}
                       dot={{ r: 3 }}
                       activeDot={{ r: 5 }}
+                      isAnimationActive={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -460,55 +463,29 @@ export default function FreeSubscribersPage() {
           </TabsContent>
 
           <TabsContent value="publications" className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-              {data.publications.map((pub, index) => (
-                <Card key={index} className="border-l-4" style={{
-                  borderLeftColor: ['#8b5cf6', '#ec4899', '#f59e0b', '#ef4444', '#10b981', '#06b6d4'][index % 6]
-                }}>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">{pub.name}</CardTitle>
-                    <Badge variant="outline">{pub.domain}</Badge>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Target</span>
-                        <span className="font-semibold">{(pub.target ?? 0).toLocaleString()}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Current</span>
-                        <span className="font-bold text-lg">{(pub.current ?? 0).toLocaleString()}</span>
-                      </div>
-                      <div className="w-full bg-muted rounded-full h-2">
-                        <div 
-                          className="bg-primary h-2 rounded-full transition-all" 
-                          style={{ width: `${calculateProgress(pub.newThisMonth ?? 0, pub.target ?? 0)}%` }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Activity className="h-3 w-3 text-green-500" />
-                          New this month
-                        </div>
-                        <div className="text-lg font-semibold text-blue-600">
-                          {(pub.newThisMonth ?? 0).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Calendar className="h-3 w-3" />
-                          Last 30 days
-                        </div>
-                        <div className="text-lg font-semibold text-green-600">
-                          {(pub.last30Days ?? 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+            <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+              <div className="grid grid-cols-[1.6fr_repeat(4,1fr)] gap-2 border-b border-zinc-200 bg-zinc-50/60 px-5 py-2.5 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                <span>Publication</span>
+                <span className="text-right">Target</span>
+                <span className="text-right">Total</span>
+                <span className="text-right">New</span>
+                <span className="text-right">30d</span>
+              </div>
+
+              {data.publications.map((pub) => (
+                <div
+                  key={pub.siteId}
+                  className="grid grid-cols-[1.6fr_repeat(4,1fr)] items-center gap-2 border-b border-zinc-100 px-5 py-3.5 text-sm last:border-b-0 hover:bg-zinc-50/70"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-zinc-900">{pub.name}</p>
+                    <p className="truncate text-xs text-zinc-400">{pub.domain}</p>
+                  </div>
+                  <span className="text-right tabular-nums text-zinc-500">{(pub.target ?? 0).toLocaleString()}</span>
+                  <span className="text-right tabular-nums font-medium text-zinc-900">{(pub.current ?? 0).toLocaleString()}</span>
+                  <span className="text-right tabular-nums text-zinc-500">+{(pub.newThisMonth ?? 0).toLocaleString()}</span>
+                  <span className="text-right tabular-nums text-zinc-500">+{(pub.last30Days ?? 0).toLocaleString()}</span>
+                </div>
               ))}
             </div>
           </TabsContent>

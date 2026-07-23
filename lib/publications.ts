@@ -40,5 +40,12 @@ export const publications = [
     domain: 'the-londoner.co.uk',
     siteId: 36,
     target: 2000
+  },
+  {
+    id: 7,
+    name: 'The Exchange',
+    domain: 'leeds.ghost.io',
+    siteId: 35,
+    target: 0
   }
 ]

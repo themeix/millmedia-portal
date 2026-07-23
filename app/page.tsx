@@ -2,326 +2,510 @@
 
 import DashboardLayout from '@/components/dashboard-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { TrendingUp, Users, Target, Calendar, ChevronDown, ChevronUp, BarChart3, PieChart, Activity } from 'lucide-react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, AreaChart, Area, Legend } from 'recharts'
-import { useState, useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  AreaChart,
+  Area,
+} from 'recharts'
 import RefreshButton from '@/components/refresh-button'
-import { cachedFetch, refreshCache, apiCache } from '@/lib/api-cache'
 
-const mockPublications = [
-  { siteId: 1, name: 'The Mill', current: 4655, target: 4500, progress: 100 },
-  { siteId: 2, name: 'The Post', current: 2376, target: 3500, progress: 67.9 },
-  { siteId: 3, name: 'The Tribune', current: 4383, target: 3200, progress: 100 },
-]
+interface Publication {
+  name: string
+  domain: string
+  target: number
+  current: number
+  newThisMonth: number
+  last30Days: number
+  siteId?: number
+}
 
-const mockHistoricalData = Array.from({ length: 13 }, (_, i) => {
-  const date = new Date(Date.now() - (12 - i) * 7 * 24 * 60 * 60 * 1000)
-  return {
-    date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
-    actual: 15000 + i * 500 + Math.random() * 300,
-    target: 12000 + i * 700,
+interface DailyDataPoint {
+  date: string
+  actual: number
+}
+
+interface WeeklyDataPoint {
+  weekStart: string
+  weekEnd: string
+  actual: number
+}
+
+interface TimeSeriesData {
+  dailyData: DailyDataPoint[]
+  weeklyData: WeeklyDataPoint[]
+}
+
+interface DashboardData {
+  publications: Publication[]
+  timeSeriesData?: Record<string, TimeSeriesData>
+  dailyData?: DailyDataPoint[]
+  weeklyData?: WeeklyDataPoint[]
+  summary: {
+    current: string
+    ninetyDaysAgo: string
+    growth: string
+    growthRate: string
+    dateRange: string
   }
-})
+  timestamp: string
+}
 
-  const formatWeek = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+// Ink + single accent. Everything else stays grayscale so the accent
+// carries the whole point of emphasis, rather than competing colors.
+const INK = '#18181B'
+const ACCENT = '#4F46E5' // indigo-600 — reserved for "paid" + positive growth
+const NEUTRAL = '#A1A1AA' // zinc-400 — reserved for "free" / baseline series
+
+// Small inline trend line — no axes, no grid, just shape. Sits next to a
+// number instead of living in its own boxed chart, so the stat strip reads
+// like a ledger with a pulse rather than a dashboard of separate widgets.
+function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
+  if (!data || data.length === 0) {
+    return <div className="h-9 w-24" />
   }
+  return (
+    <ResponsiveContainer width={96} height={36}>
+      <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+        <Line
+          type="monotone"
+          dataKey="actual"
+          stroke={color}
+          strokeWidth={1.75}
+          dot={false}
+          isAnimationActive={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
 
 export default function Home() {
-  const [selectedPublication, setSelectedPublication] = useState<string>('all')
-  const [expandedPublication, setExpandedPublication] = useState<string | null>(null)
-  const [weeklyData, setWeeklyData] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+  const [freeData, setFreeData] = useState<DashboardData | null>(null)
+  const [paidData, setPaidData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [selectedSite, setSelectedSite] = useState<string>('all')
 
   const fetchData = async (forceRefresh = false) => {
     setLoading(true)
     try {
-      const url = '/api/dashboard/paid/weekly'
-      const cacheKey = url
-      const cacheAge = apiCache.getCacheAge(cacheKey)
-      
-      let result
-      if (forceRefresh || cacheAge >= 5 || cacheAge === -1) {
-        result = await refreshCache(url)
-      } else {
-        result = await cachedFetch(url)
+      const freeCacheKey = 'free_dashboard_data'
+      const paidCacheKey = 'paid_dashboard_data'
+      const cacheDuration = 24 * 60 * 60 * 1000
+
+      const loadFromCacheOrFetch = async (cacheKey: string, url: string) => {
+        if (!forceRefresh) {
+          const cached = localStorage.getItem(cacheKey)
+          if (cached) {
+            try {
+              const parsedCache = JSON.parse(cached)
+              const age = Date.now() - parsedCache.ts
+              if (age < cacheDuration) {
+                return parsedCache.data as DashboardData
+              }
+            } catch (e) {
+              localStorage.removeItem(cacheKey)
+            }
+          }
+        }
+
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const result = await response.json()
+        localStorage.setItem(cacheKey, JSON.stringify({
+          data: result,
+          ts: Date.now()
+        }))
+        return result as DashboardData
       }
-      
-      setWeeklyData((result as any).historicalData || [])
+
+      const [free, paid] = await Promise.all([
+        loadFromCacheOrFetch(freeCacheKey, '/api/dashboard/free/daily'),
+        loadFromCacheOrFetch(paidCacheKey, '/api/dashboard/paid/daily')
+      ])
+
+      setFreeData(free)
+      setPaidData(paid)
       setLastRefreshed(new Date())
     } catch (err) {
-      console.error('Error fetching weekly data:', err)
-      // Use mock data if API fails
-      setWeeklyData(mockHistoricalData)
+      console.error('Error fetching dashboard data:', err)
     } finally {
       setLoading(false)
     }
   }
 
   const handleRefresh = async () => {
+    localStorage.removeItem('free_dashboard_data')
+    localStorage.removeItem('paid_dashboard_data')
     await fetchData(true)
   }
 
+  const activeData = selectedSite === 'all' ? null : freeData?.publications.find(p => p.siteId === Number(selectedSite)) || paidData?.publications.find(p => p.siteId === Number(selectedSite))
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const formatFullDate = (dateStr: string) => {
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  const getFreeTimeSeries = () => {
+    if (!freeData) return { dailyData: [], weeklyData: [] }
+    if (freeData.timeSeriesData) {
+      return freeData.timeSeriesData[selectedSite] || freeData.timeSeriesData['all'] || { dailyData: [], weeklyData: [] }
+    }
+    return { dailyData: freeData.dailyData || [], weeklyData: freeData.weeklyData || [] }
+  }
+
+  const getPaidTimeSeries = () => {
+    if (!paidData) return { dailyData: [], weeklyData: [] }
+    if (paidData.timeSeriesData) {
+      return paidData.timeSeriesData[selectedSite] || paidData.timeSeriesData['all'] || { dailyData: [], weeklyData: [] }
+    }
+    return { dailyData: paidData.dailyData || [], weeklyData: paidData.weeklyData || [] }
+  }
+
+  const freeTimeSeries = getFreeTimeSeries()
+  const paidTimeSeries = getPaidTimeSeries()
+
+  const allPublications = [
+    ...(freeData?.publications || []),
+    ...(paidData?.publications || [])
+  ]
+
+  const uniquePublications = Array.from(new Map(allPublications.map(p => [p.siteId, p])).values())
+
+  // summary values can arrive as pre-formatted strings (e.g. "12,345"),
+  // and Number("12,345") is NaN — strip non-numeric characters first and
+  // fall back to 0 if parsing still fails, so totals never render as NaN.
+  const toNumber = (value: string | number | undefined) => {
+    if (value === undefined || value === null) return 0
+    const parsed = typeof value === 'number' ? value : Number(String(value).replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+
+  const totalCurrent = toNumber(freeData?.summary.current) + toNumber(paidData?.summary.current)
+  const totalGrowth = toNumber(freeData?.summary.growth) + toNumber(paidData?.summary.growth)
+
   useEffect(() => {
-    fetchData()
+    const loadCachedData = async () => {
+      const freeCacheKey = 'free_dashboard_data'
+      const paidCacheKey = 'paid_dashboard_data'
+      const cacheDuration = 24 * 60 * 60 * 1000
+
+      const loadCache = async (cacheKey: string, setter: (data: DashboardData) => void) => {
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          try {
+            const obj = JSON.parse(cached)
+            const age = Date.now() - obj.ts
+            if (age < cacheDuration) {
+              setter(obj.data)
+              return true
+            }
+          } catch (e) {
+            localStorage.removeItem(cacheKey)
+          }
+        }
+        return false
+      }
+
+      const [freeCached, paidCached] = await Promise.all([
+        loadCache(freeCacheKey, setFreeData),
+        loadCache(paidCacheKey, setPaidData)
+      ])
+
+      if (!freeCached || !paidCached) {
+        await fetchData()
+      } else {
+        setLastRefreshed(new Date())
+        setLoading(false)
+      }
+    }
+
+    loadCachedData()
   }, [])
+
+  if (loading && !freeData && !paidData) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+      <div className="container mx-auto max-w-6xl p-6 lg:p-10">
+        {/* Header */}
+        <div className="mb-10 flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Paid Subscribers</h1>
-            <p className="text-muted-foreground mt-1">Track your subscriber growth across all publications</p>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">Subscribers</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">Dashboard Overview</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <RefreshButton 
-              onRefresh={handleRefresh}
-              isLoading={loading}
-              lastRefreshed={lastRefreshed}
-              cacheAge={lastRefreshed ? Math.floor((Date.now() - lastRefreshed.getTime()) / 60000) : -1}
-            />
-            <Select value={selectedPublication} onValueChange={setSelectedPublication}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select publication" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Company</SelectItem>
-                {mockPublications.map(pub => (
-                  <SelectItem key={pub.siteId} value={pub.siteId.toString()}>
-                  {pub.name}
-                </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <RefreshButton
+            onRefresh={handleRefresh}
+            isLoading={loading}
+            lastRefreshed={lastRefreshed}
+            cacheAge={lastRefreshed ? Math.floor((Date.now() - lastRefreshed.getTime()) / 60000) : -1}
+          />
+        </div>
+
+        {/* Stat ledger — one hairline-divided row instead of four boxed,
+            color-coded cards. Numbers are tabular; each carries its own
+            quiet sparkline rather than a decorative icon. */}
+        <div className="mb-12 grid grid-cols-1 divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">Total</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                {selectedSite === 'all' 
+                  ? totalCurrent.toLocaleString()
+                  : ((activeData?.current ?? 0) || 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-zinc-500">
+                +{selectedSite === 'all' 
+                  ? totalGrowth.toLocaleString()
+                  : ((activeData?.newThisMonth ?? 0) || 0).toLocaleString()} <span className="text-zinc-400">this month</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">Free</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                {selectedSite === 'all' 
+                  ? (freeData?.summary.current || '0')
+                  : ((activeData && freeData?.publications.find(p => p.siteId === Number(selectedSite))?.current) ?? 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-zinc-500">
+                +{selectedSite === 'all' 
+                  ? (freeData?.summary.growth || '0')
+                  : ((activeData && freeData?.publications.find(p => p.siteId === Number(selectedSite))?.newThisMonth) ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
+              </p>
+            </div>
+            <Sparkline data={freeTimeSeries.dailyData} color={NEUTRAL} />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-6">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-400">Paid</p>
+              <p className="mt-2 text-3xl font-semibold tabular-nums text-zinc-900">
+                {selectedSite === 'all' 
+                  ? (paidData?.summary.current || '0')
+                  : ((activeData && paidData?.publications.find(p => p.siteId === Number(selectedSite))?.current) ?? 0).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs tabular-nums" style={{ color: ACCENT }}>
+                +{selectedSite === 'all' 
+                  ? (paidData?.summary.growth || '0')
+                  : ((activeData && paidData?.publications.find(p => p.siteId === Number(selectedSite))?.newThisMonth) ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
+              </p>
+            </div>
+            <Sparkline data={paidTimeSeries.dailyData} color={ACCENT} />
           </div>
         </div>
-        
-        <Tabs defaultValue="overview" className="space-y-6">
+
+        <Tabs defaultValue="growth" className="space-y-6">
           <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="growth">Growth</TabsTrigger>
             <TabsTrigger value="publications">Publications</TabsTrigger>
-            <TabsTrigger value="trends">Trends</TabsTrigger>
           </TabsList>
-          
-          <TabsContent value="overview" className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card className="border-l-4 border-l-blue-500">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Current Subscribers</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">17,163</div>
-                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    <Activity className="h-3 w-3 text-green-500" />
-                    Live from Supabase
-                  </p>
-                </CardContent>
-              </Card>
-              
-       
-              
-              <Card className="border-l-4 border-l-green-500">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">New This Month</CardTitle>
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">+161</div>
-                  <p className="text-xs text-muted-foreground mt-1">New paid subscribers</p>
-                </CardContent>
-              </Card>
-              
-              <Card className="border-l-4 border-l-orange-500">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">30-Day Growth</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-600">+235</div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    +1.4% growth rate
-                  </p>
-                </CardContent>
-              </Card>
+
+          <TabsContent value="growth" className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-zinc-900">
+                  {selectedSite === 'all' ? 'All sites' : activeData?.name}
+                </h2>
+                <p className="text-sm text-zinc-500">
+                  {selectedSite === 'all'
+                    ? 'Combined daily growth across every publication'
+                    : `${activeData?.domain}`}
+                </p>
+              </div>
+              <Select value={selectedSite} onValueChange={setSelectedSite}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Select a site" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sites</SelectItem>
+                  {uniquePublications.map((pub) => (
+                    <SelectItem key={String(pub.siteId)} value={String(pub.siteId)}>
+                      {pub.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
-                    7-Day Rolling Growth (Last 3 Months)
-                  </CardTitle>
-                  <CardDescription>
-                    Weekly subscriber trends with pace-to-target reference
-                  </CardDescription>
+              <Card className="border-zinc-200 shadow-none">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-zinc-500">Free — daily</CardTitle>
+                  <CardDescription className="text-xs">New free subscribers, last 30 days</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <AreaChart data={weeklyData.length > 0 ? weeklyData : mockHistoricalData}>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <AreaChart data={freeTimeSeries.dailyData}>
                       <defs>
-                        <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        <linearGradient id="colorFree" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={NEUTRAL} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={NEUTRAL} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="date" 
-                        tickFormatter={formatWeek}
-                        className="text-xs"
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={formatDate}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
                       />
-                      <YAxis className="text-xs" />
-                      <Tooltip 
-                        labelFormatter={formatWeek}
-                        formatter={(value: number, name: string) => [
-                          value.toLocaleString(),
-                          name === 'actual' ? 'Subscribers' : 'Pace Target'
-                        ]}
+                      <YAxis
+                        tickFormatter={(value) => value.toLocaleString()}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
                       />
-                      <Area 
-                        type="monotone" 
-                        dataKey="actual" 
-                        stroke="#3b82f6" 
-                        strokeWidth={2}
+                      <Tooltip
+                        labelFormatter={formatFullDate}
+                        formatter={(value: number) => [value.toLocaleString(), 'New free']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={NEUTRAL}
+                        strokeWidth={1.75}
                         fillOpacity={1}
-                        fill="url(#colorActual)"
-                        name="Actual"
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="target" 
-                        stroke="#ef4444" 
-                        strokeDasharray="5 5" 
-                        strokeWidth={2}
-                        name="Pace Target"
-                        dot={false}
+                        fill="url(#colorFree)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <PieChart className="h-5 w-5" />
-                    Current Performance
-                  </CardTitle>
-                  <CardDescription>
-                    Real-time metrics for selected view
-                  </CardDescription>
+              <Card className="border-zinc-200 shadow-none">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-zinc-500">Paid — daily</CardTitle>
+                  <CardDescription className="text-xs">New paid subscribers, last 30 days</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <Users className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">Total Subscribers</p>
-                          <p className="text-xs text-muted-foreground">Active paid subscribers</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xl font-bold">17,163</div>
-                        <Badge variant="default">On Track</Badge>
-                      </div>
-                    </div>
-                  </div>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <AreaChart data={paidTimeSeries.dailyData}>
+                      <defs>
+                        <linearGradient id="colorPaid" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={ACCENT} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={ACCENT} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={formatDate}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tickFormatter={(value) => value.toLocaleString()}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
+                      />
+                      <Tooltip
+                        labelFormatter={formatFullDate}
+                        formatter={(value: number) => [value.toLocaleString(), 'New paid']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={ACCENT}
+                        strokeWidth={1.75}
+                        fillOpacity={1}
+                        fill="url(#colorPaid)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
-          
+
           <TabsContent value="publications" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Publication Breakdown</CardTitle>
-                <CardDescription>Detailed metrics for each publication</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {mockPublications.map((publication) => {
-                    const isExpanded = expandedPublication === publication.name
-                    const isOnPace = publication.current >= publication.target
-                    
-                    return (
-                      <div key={publication.siteId} className="rounded-lg border bg-card">
-                        <div 
-                          className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                          onClick={() => setExpandedPublication(isExpanded ? null : publication.name)}
-                        >
-                          <div className="flex items-center gap-3">
-                            {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                            <span className="font-medium">{publication.name}</span>
-                            <Badge variant={isOnPace ? 'default' : 'destructive'}>
-                              {isOnPace ? 'On Pace' : 'Behind Pace'}
-                            </Badge>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-medium">{publication.current.toLocaleString()}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {publication.progress.toFixed(1)}% of {publication.target.toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="trends" className="space-y-6">
-            <Card>
-                <CardHeader>
-                  <CardTitle>Detailed Trends</CardTitle>
-                  <CardDescription>7-day rolling growth patterns over 3 months</CardDescription>
-                </CardHeader>
-              <CardContent>
-                  <ResponsiveContainer width="100%" height={400}>
-                    <BarChart data={weeklyData.length > 0 ? weeklyData : mockHistoricalData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="date" 
-                        tickFormatter={formatWeek}
-                        className="text-xs"
-                      />
-                      <YAxis className="text-xs" />
-                      <Tooltip 
-                        labelFormatter={formatWeek}
-                        formatter={(value: number, name: string) => [
-                          value.toLocaleString(),
-                          name === 'actual' ? 'Actual' : 'Target'
-                        ]}
-                      />
-                      <Legend />
-                      <Bar 
-                        dataKey="actual" 
-                        fill="#3b82f6" 
-                        name="Actual"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Bar 
-                        dataKey="target" 
-                        fill="#94a3b8"
-                        name="Target"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-              </CardContent>
-            </Card>
+            {/* Ledger list instead of a grid of color-bordered cards.
+                One row per publication, numeric columns right-aligned
+                and tabular so totals scan like a statement. */}
+            <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+              <div className="grid grid-cols-[1.6fr_repeat(6,1fr)] gap-2 border-b border-zinc-200 bg-zinc-50/60 px-5 py-2.5 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                <span>Publication</span>
+                <span className="text-right">Target</span>
+                <span className="text-right">Total</span>
+                <span className="text-right">New</span>
+                <span className="text-right">30d</span>
+                <span className="text-right">Free</span>
+                <span className="text-right">Paid</span>
+              </div>
+
+              {uniquePublications.map((pub) => {
+                const freePub = freeData?.publications.find(p => p.siteId === pub.siteId)
+                const paidPub = paidData?.publications.find(p => p.siteId === pub.siteId)
+                const totalPubCurrent = (freePub?.current || 0) + (paidPub?.current || 0)
+                const totalNewThisMonth = (freePub?.newThisMonth || 0) + (paidPub?.newThisMonth || 0)
+                const totalLast30Days = (freePub?.last30Days || 0) + (paidPub?.last30Days || 0)
+
+                return (
+                  <div
+                    key={pub.siteId}
+                    className="grid grid-cols-[1.6fr_repeat(6,1fr)] items-center gap-2 border-b border-zinc-100 px-5 py-3.5 text-sm last:border-b-0 hover:bg-zinc-50/70"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-zinc-900">{pub.name}</p>
+                      <p className="truncate text-xs text-zinc-400">{pub.domain}</p>
+                    </div>
+                    <span className="text-right tabular-nums text-zinc-500">{(pub.target ?? 0).toLocaleString()}</span>
+                    <span className="text-right tabular-nums font-medium text-zinc-900">
+                      {totalPubCurrent.toLocaleString()}
+                    </span>
+                    <span className="text-right tabular-nums text-zinc-500">
+                      +{totalNewThisMonth.toLocaleString()}
+                    </span>
+                    <span className="text-right tabular-nums text-zinc-500">
+                      +{totalLast30Days.toLocaleString()}
+                    </span>
+                    <span className="text-right tabular-nums text-zinc-500">
+                      {(freePub?.current || 0).toLocaleString()}
+                    </span>
+                    <span className="text-right tabular-nums font-medium" style={{ color: ACCENT }}>
+                      {(paidPub?.current || 0).toLocaleString()}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </TabsContent>
         </Tabs>
       </div>
