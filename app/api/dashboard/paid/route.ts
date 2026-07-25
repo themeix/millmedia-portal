@@ -11,7 +11,7 @@ export async function GET() {
     const siteIds = Object.keys(PUBLICATION_CONFIG).map(id => parseInt(id))
     
     const publicationDataPromises = siteIds.map(async (siteIdNum) => {
-      const config = PUBLICATION_CONFIG[siteIdNum.toString()]
+      const config = (PUBLICATION_CONFIG as Record<number, any>)[siteIdNum]
       
       const [
         { count: currentCount },
@@ -84,10 +84,10 @@ export async function GET() {
       .lt('created_at', historicalEnd)
     
     const historicalData = months.map(month => {
-      const monthCount = historicalMembers.filter(member => {
+      const monthCount = historicalMembers?.filter(member => {
         const memberDate = new Date(member.created_at)
         return memberDate >= month.start && memberDate < month.end
-      }).length
+      }).length || 0
       
       return {
         month: month.key,
