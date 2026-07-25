@@ -84,20 +84,31 @@ const INK = '#18181B'
 const ACCENT = '#4F46E5' // indigo-600 — reserved for "paid" + positive growth
 const NEUTRAL = '#A1A1AA' // zinc-400 — reserved for "free" / baseline series
 
+const PUBLICATION_COLORS: Record<string, string> = {
+  'manchestermill.co.uk': '#ff0000',
+  'sheffieldtribune.co.uk': '#E74C4A',
+  'livpost.co.uk': '#B63518',
+  'birminghamdispatch.co.uk': '#8B4513',
+  'glasgowbell.co.uk': '#D2691E',
+  'the-londoner.co.uk': '#A0522D',
+  'leeds.ghost.io': '#CD853F'
+}
+
 // Small inline trend line — no axes, no grid, just shape. Sits next to a
 // number instead of living in its own boxed chart, so the stat strip reads
 // like a ledger with a pulse rather than a dashboard of separate widgets.
-function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
+function Sparkline({ data, color, domain }: { data: DailyDataPoint[]; color: string; domain?: string }) {
   if (!data || data.length === 0) {
     return <div className="h-9 w-24" />
   }
+  const strokeColor = domain && PUBLICATION_COLORS[domain] ? PUBLICATION_COLORS[domain] : color
   return (
     <ResponsiveContainer width={96} height={36}>
       <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
         <Line
           type="monotone"
           dataKey="actual"
-          stroke={color}
+          stroke={strokeColor}
           strokeWidth={1.75}
           dot={false}
           isAnimationActive={false}
@@ -162,6 +173,11 @@ export default function Home() {
   }
 
   const activeData = selectedSite === 'all' ? null : freeData?.publications.find(p => p.siteId === Number(selectedSite)) || paidData?.publications.find(p => p.siteId === Number(selectedSite))
+  const freePub = freeData?.publications.find(p => p.siteId === Number(selectedSite))
+  const paidPub = paidData?.publications.find(p => p.siteId === Number(selectedSite))
+  const activeDomain = freePub?.domain || paidPub?.domain
+  const freeColor = activeDomain && PUBLICATION_COLORS[activeDomain] ? PUBLICATION_COLORS[activeDomain] : NEUTRAL
+  const paidColor = activeDomain && PUBLICATION_COLORS[activeDomain] ? PUBLICATION_COLORS[activeDomain] : ACCENT
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -301,7 +317,7 @@ export default function Home() {
                   : ((activeData && freeData?.publications.find(p => p.siteId === Number(selectedSite))?.newThisMonth) ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
               </p>
             </div>
-            <Sparkline data={freeTimeSeries.dailyData} color={NEUTRAL} />
+            <Sparkline data={freeTimeSeries.dailyData} color={freeColor} domain={activeDomain} />
           </div>
 
           <div className="flex items-center justify-between gap-4 p-6">
@@ -312,13 +328,13 @@ export default function Home() {
                   ? (paidData?.summary.current || '0')
                   : ((activeData && paidData?.publications.find(p => p.siteId === Number(selectedSite))?.current) ?? 0).toLocaleString()}
               </p>
-              <p className="mt-1 text-xs tabular-nums" style={{ color: ACCENT }}>
+              <p className="mt-1 text-xs tabular-nums" style={{ color: paidColor }}>
                 +{selectedSite === 'all' 
                   ? (paidData?.summary.growth || '0')
                   : ((activeData && paidData?.publications.find(p => p.siteId === Number(selectedSite))?.newThisMonth) ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
               </p>
             </div>
-            <Sparkline data={paidTimeSeries.dailyData} color={ACCENT} />
+            <Sparkline data={paidTimeSeries.dailyData} color={paidColor} domain={activeDomain} />
           </div>
         </div>
 
@@ -366,8 +382,8 @@ export default function Home() {
                     <AreaChart data={freeTimeSeries.dailyData}>
                       <defs>
                         <linearGradient id="colorFree" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={NEUTRAL} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={NEUTRAL} stopOpacity={0} />
+                          <stop offset="5%" stopColor={freeColor} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={freeColor} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
@@ -393,7 +409,7 @@ export default function Home() {
                       <Area
                         type="monotone"
                         dataKey="actual"
-                        stroke={NEUTRAL}
+                        stroke={freeColor}
                         strokeWidth={1.75}
                         fillOpacity={1}
                         fill="url(#colorFree)"
@@ -413,8 +429,8 @@ export default function Home() {
                     <AreaChart data={paidTimeSeries.dailyData}>
                       <defs>
                         <linearGradient id="colorPaid" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={ACCENT} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={ACCENT} stopOpacity={0} />
+                          <stop offset="5%" stopColor={paidColor} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={paidColor} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
@@ -440,7 +456,7 @@ export default function Home() {
                       <Area
                         type="monotone"
                         dataKey="actual"
-                        stroke={ACCENT}
+                        stroke={paidColor}
                         strokeWidth={1.75}
                         fillOpacity={1}
                         fill="url(#colorPaid)"
@@ -496,7 +512,7 @@ export default function Home() {
                     <span className="text-right tabular-nums text-zinc-500">
                       {(freePub?.current || 0).toLocaleString()}
                     </span>
-                    <span className="text-right tabular-nums font-medium" style={{ color: ACCENT }}>
+                    <span className="text-right tabular-nums font-medium" style={{ color: pub.domain && PUBLICATION_COLORS[pub.domain] ? PUBLICATION_COLORS[pub.domain] : ACCENT }}>
                       {(paidPub?.current || 0).toLocaleString()}
                     </span>
                   </div>

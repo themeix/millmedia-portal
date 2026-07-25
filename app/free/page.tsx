@@ -70,17 +70,28 @@ interface DashboardData {
 
 const NEUTRAL = '#A1A1AA'
 
-function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
+const PUBLICATION_COLORS: Record<string, string> = {
+  'manchestermill.co.uk': '#ff0000',
+  'sheffieldtribune.co.uk': '#E74C4A',
+  'livpost.co.uk': '#B63518',
+  'birminghamdispatch.co.uk': '#8B4513',
+  'glasgowbell.co.uk': '#D2691E',
+  'the-londoner.co.uk': '#A0522D',
+  'leeds.ghost.io': '#CD853F'
+}
+
+function Sparkline({ data, color, domain }: { data: DailyDataPoint[]; color: string; domain?: string }) {
   if (!data || data.length === 0) {
     return <div className="h-9 w-24" />
   }
+  const strokeColor = domain && PUBLICATION_COLORS[domain] ? PUBLICATION_COLORS[domain] : color
   return (
     <ResponsiveContainer width={96} height={36}>
       <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
         <Line
           type="monotone"
           dataKey="actual"
-          stroke={color}
+          stroke={strokeColor}
           strokeWidth={1.75}
           dot={false}
           isAnimationActive={false}
@@ -175,6 +186,8 @@ export default function FreeSubscribersPage() {
   const selectedPub = data?.publications?.find(p => 
     selectedSite !== 'all' && p.siteId === Number(selectedSite)
   )
+  const selectedDomain = selectedPub?.domain
+  const freeColor = selectedDomain && PUBLICATION_COLORS[selectedDomain] ? PUBLICATION_COLORS[selectedDomain] : NEUTRAL
 
   const toNumber = (value: string | number | undefined) => {
     if (value === undefined || value === null) return 0
@@ -261,7 +274,7 @@ export default function FreeSubscribersPage() {
                 +{selectedSite === 'all' ? data.summary.growth : (selectedPub?.newThisMonth ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
               </p>
             </div>
-            <Sparkline data={timeSeries.dailyData} color={NEUTRAL} />
+            <Sparkline data={timeSeries.dailyData} color={freeColor} domain={selectedDomain} />
           </div>
 
           <div className="flex items-center justify-between gap-4 p-6">
@@ -335,8 +348,8 @@ export default function FreeSubscribersPage() {
                     <AreaChart data={timeSeries.dailyData}>
                       <defs>
                         <linearGradient id="colorFreeGrowth" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={NEUTRAL} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={NEUTRAL} stopOpacity={0} />
+                          <stop offset="5%" stopColor={freeColor} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={freeColor} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
@@ -362,7 +375,7 @@ export default function FreeSubscribersPage() {
                       <Area
                         type="monotone"
                         dataKey="actual"
-                        stroke={NEUTRAL}
+                        stroke={freeColor}
                         strokeWidth={1.75}
                         fillOpacity={1}
                         fill="url(#colorFreeGrowth)"
@@ -409,7 +422,7 @@ export default function FreeSubscribersPage() {
                       <Line
                         type="monotone"
                         dataKey="actual"
-                        stroke={NEUTRAL}
+                        stroke={freeColor}
                         strokeWidth={1.75}
                         dot={{ r: 3 }}
                         isAnimationActive={false}
@@ -425,41 +438,41 @@ export default function FreeSubscribersPage() {
                 <CardTitle className="text-sm font-medium text-zinc-500">Growth trend</CardTitle>
                 <CardDescription className="text-xs">Daily free subscriber patterns, last 30 days</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={timeSeries.dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDate}
-                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tickFormatter={(value) => value.toLocaleString()}
-                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={40}
-                    />
-                    <Tooltip
-                      labelFormatter={formatFullDate}
-                      formatter={(value: number) => [value.toLocaleString(), 'New free']}
-                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="actual"
-                      stroke={NEUTRAL}
-                      strokeWidth={1.75}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={timeSeries.dailyData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={formatDate}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tickFormatter={(value) => value.toLocaleString()}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
+                      />
+                      <Tooltip
+                        labelFormatter={formatFullDate}
+                        formatter={(value: number) => [value.toLocaleString(), 'New free']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={freeColor}
+                        strokeWidth={1.75}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
             </Card>
           </TabsContent>
 

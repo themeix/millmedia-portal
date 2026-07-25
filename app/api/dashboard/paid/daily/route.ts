@@ -141,9 +141,7 @@ export async function GET() {
         .gte('created_at', last30.toISOString())
     ])
 
-    const siteTimeSeriesData: Record<string, { dailyData: any[], weeklyData: any[] }> = {}
-
-    for (const pub of publications) {
+    const siteTimeSeriesDataPromises = publications.map(async (pub) => {
       const { data: siteRecords } = await supabase
         .from('members')
         .select('created_at')
@@ -152,8 +150,14 @@ export async function GET() {
         .gte('created_at', last30.toISOString())
         .order('created_at', { ascending: true })
 
-      siteTimeSeriesData[String(pub.siteId)] = generateTimeSeries(siteRecords)
-    }
+      return { siteId: String(pub.siteId), data: generateTimeSeries(siteRecords) }
+    })
+
+    const siteTimeSeriesResults = await Promise.all(siteTimeSeriesDataPromises)
+    const siteTimeSeriesData: Record<string, { dailyData: any[], weeklyData: any[] }> = {}
+    siteTimeSeriesResults.forEach(result => {
+      siteTimeSeriesData[result.siteId] = result.data
+    })
 
     const allDailyCounts: Record<string, number> = {}
     const allWeeklyCounts: Record<string, number> = {}

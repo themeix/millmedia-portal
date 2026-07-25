@@ -68,19 +68,41 @@ interface DashboardData {
   timestamp: string
 }
 
+interface HistoricalDataPoint {
+  week: string
+  actual: number
+  target?: number
+}
+
+interface HistoricalData {
+  historicalData: Record<string, HistoricalDataPoint[]>
+  timestamp: string
+}
+
 const ACCENT = '#4F46E5'
 
-function Sparkline({ data, color }: { data: DailyDataPoint[]; color: string }) {
+const PUBLICATION_COLORS: Record<string, string> = {
+  'manchestermill.co.uk': '#ff0000',
+  'sheffieldtribune.co.uk': '#E74C4A',
+  'livpost.co.uk': '#B63518',
+  'birminghamdispatch.co.uk': '#8B4513',
+  'glasgowbell.co.uk': '#D2691E',
+  'the-londoner.co.uk': '#A0522D',
+  'leeds.ghost.io': '#CD853F'
+}
+
+function Sparkline({ data, color, domain }: { data: DailyDataPoint[]; color: string; domain?: string }) {
   if (!data || data.length === 0) {
     return <div className="h-9 w-24" />
   }
+  const strokeColor = domain && PUBLICATION_COLORS[domain] ? PUBLICATION_COLORS[domain] : color
   return (
     <ResponsiveContainer width={96} height={36}>
       <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
         <Line
           type="monotone"
           dataKey="actual"
-          stroke={color}
+          stroke={strokeColor}
           strokeWidth={1.75}
           dot={false}
           isAnimationActive={false}
@@ -96,6 +118,7 @@ export default function PaidSubscribersPage() {
   const [error, setError] = useState<string | null>(null)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [selectedSite, setSelectedSite] = useState<string>('all')
+  const [historicalData, setHistoricalData] = useState<HistoricalData | null>(null)
 
   const fetchData = async (forceRefresh = false) => {
     setLoading(true)
@@ -143,9 +166,49 @@ export default function PaidSubscribersPage() {
     }
   }
 
+  const fetchHistoricalData = async () => {
+    try {
+      const cacheKey = 'paid_historical_data'
+      const cacheDuration = 24 * 60 * 60 * 1000
+      
+      const loadFromCacheOrFetch = async (ck: string) => {
+        const cached = localStorage.getItem(ck)
+        if (cached) {
+          try {
+            const parsedCache = JSON.parse(cached)
+            const age = Date.now() - parsedCache.ts
+            if (age < cacheDuration) {
+              return parsedCache.data as HistoricalData
+            }
+          } catch (e) {
+            localStorage.removeItem(ck)
+          }
+        }
+        
+        const response = await fetch('/api/dashboard/paid/history')
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const result = await response.json()
+        localStorage.setItem(ck, JSON.stringify({
+          data: result,
+          ts: Date.now()
+        }))
+        return result as HistoricalData
+      }
+      
+      const result = await loadFromCacheOrFetch(cacheKey)
+      setHistoricalData(result)
+    } catch (err) {
+      console.error('Failed to fetch historical data:', err)
+    }
+  }
+
   const handleRefresh = async () => {
     localStorage.removeItem('paid_dashboard_data')
+    localStorage.removeItem('paid_historical_data')
     await fetchData(true)
+    await fetchHistoricalData()
   }
 
   const formatDate = (dateStr: string) => {
@@ -156,6 +219,87 @@ export default function PaidSubscribersPage() {
   const formatFullDate = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  const formatMonth = (monthStr: string) => {
+    const date = new Date(monthStr + '-01')
+    return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+  }
+
+  const formatWeek = (weekStr: string) => {
+    const date = new Date(weekStr)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const HistoricalChart = ({ 
+    title, 
+    data, 
+    color, 
+    showTarget = false 
+  }: { 
+    title: string
+    data: HistoricalDataPoint[]
+    color: string
+    showTarget?: boolean 
+  }) => {
+    if (!data || data.length === 0) {
+      return null
+    }
+
+    return (
+      <Card className="border-zinc-200 shadow-none">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-zinc-500">{title}</CardTitle>
+          <CardDescription className="text-xs">Historical growth, last 52 weeks</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+              <XAxis
+                dataKey="week"
+                tickFormatter={formatWeek}
+                tick={{ fontSize: 9, fill: '#A1A1AA' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={(value) => value >= 1000 ? (value / 1000).toFixed(1) + 'k' : value}
+                tick={{ fontSize: 9, fill: '#A1A1AA' }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip
+                labelFormatter={(value) => formatWeek(value)}
+                formatter={(value: number) => [value.toLocaleString(), 'Paid subscribers']}
+                contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #E4E4E7' }}
+              />
+              <Line
+                type="monotone"
+                dataKey="actual"
+                stroke={color}
+                strokeWidth={1.5}
+                dot={false}
+                activeDot={{ r: 4 }}
+                isAnimationActive={false}
+              />
+              {showTarget && data[0]?.target && (
+                <Line
+                  type="monotone"
+                  dataKey="target"
+                  stroke="#9CA3AF"
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+    )
   }
 
   const getTimeSeriesData = () => {
@@ -175,6 +319,8 @@ export default function PaidSubscribersPage() {
   const selectedPub = data?.publications?.find(p => 
     selectedSite !== 'all' && p.siteId === Number(selectedSite)
   )
+  const selectedDomain = selectedPub?.domain
+  const paidColor = selectedDomain && PUBLICATION_COLORS[selectedDomain] ? PUBLICATION_COLORS[selectedDomain] : ACCENT
 
   const toNumber = (value: string | number | undefined) => {
     if (value === undefined || value === null) return 0
@@ -198,16 +344,19 @@ export default function PaidSubscribersPage() {
             setData(obj.data)
             setLastRefreshed(new Date(obj.ts))
             setLoading(false)
-            return
           } else {
             localStorage.removeItem('paid_dashboard_data')
+            await fetchData()
           }
         } catch (e) {
           localStorage.removeItem('paid_dashboard_data')
+          await fetchData()
         }
+      } else {
+        await fetchData()
       }
       
-      await fetchData()
+      await fetchHistoricalData()
     }
     checkCache()
   }, [])
@@ -261,7 +410,7 @@ export default function PaidSubscribersPage() {
                 +{selectedSite === 'all' ? data.summary.growth : (selectedPub?.newThisMonth ?? 0).toLocaleString()} <span className="text-zinc-400">this month</span>
               </p>
             </div>
-            <Sparkline data={timeSeries.dailyData} color={ACCENT} />
+            <Sparkline data={timeSeries.dailyData} color={paidColor} domain={selectedDomain} />
           </div>
 
           <div className="flex items-center justify-between gap-4 p-6">
@@ -294,6 +443,7 @@ export default function PaidSubscribersPage() {
         <Tabs defaultValue="growth" className="space-y-6">
           <TabsList>
             <TabsTrigger value="growth">Growth</TabsTrigger>
+            <TabsTrigger value="history">History (1 Year)</TabsTrigger>
             <TabsTrigger value="publications">Publications</TabsTrigger>
           </TabsList>
 
@@ -335,8 +485,8 @@ export default function PaidSubscribersPage() {
                     <AreaChart data={timeSeries.dailyData}>
                       <defs>
                         <linearGradient id="colorPaidGrowth" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={ACCENT} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={ACCENT} stopOpacity={0} />
+                          <stop offset="5%" stopColor={paidColor} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={paidColor} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
@@ -362,7 +512,7 @@ export default function PaidSubscribersPage() {
                       <Area
                         type="monotone"
                         dataKey="actual"
-                        stroke={ACCENT}
+                        stroke={paidColor}
                         strokeWidth={1.75}
                         fillOpacity={1}
                         fill="url(#colorPaidGrowth)"
@@ -409,7 +559,7 @@ export default function PaidSubscribersPage() {
                       <Line
                         type="monotone"
                         dataKey="actual"
-                        stroke={ACCENT}
+                        stroke={paidColor}
                         strokeWidth={1.75}
                         dot={{ r: 3 }}
                         isAnimationActive={false}
@@ -425,42 +575,79 @@ export default function PaidSubscribersPage() {
                 <CardTitle className="text-sm font-medium text-zinc-500">Growth trend</CardTitle>
                 <CardDescription className="text-xs">Daily paid subscriber patterns, last 30 days</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={timeSeries.dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDate}
-                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tickFormatter={(value) => value.toLocaleString()}
-                      tick={{ fontSize: 11, fill: '#A1A1AA' }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={40}
-                    />
-                    <Tooltip
-                      labelFormatter={formatFullDate}
-                      formatter={(value: number) => [value.toLocaleString(), 'New paid']}
-                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="actual"
-                      stroke={ACCENT}
-                      strokeWidth={1.75}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={timeSeries.dailyData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F4F4F5" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={formatDate}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tickFormatter={(value) => value.toLocaleString()}
+                        tick={{ fontSize: 11, fill: '#A1A1AA' }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
+                      />
+                      <Tooltip
+                        labelFormatter={formatFullDate}
+                        formatter={(value: number) => [value.toLocaleString(), 'New paid']}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E4E4E7' }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        stroke={paidColor}
+                        strokeWidth={1.75}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-zinc-900">
+                  Historical Growth (1 Year)
+                </h2>
+                <p className="text-sm text-zinc-500">
+                  Total paid subscribers over the last 52 weeks - all sites
+                </p>
+              </div>
+            </div>
+
+            {historicalData ? (
+              <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+                <HistoricalChart 
+                  title="All Sites"
+                  data={historicalData?.historicalData?.all || []}
+                  color={ACCENT}
+                  showTarget={true}
+                />
+                {data?.publications.map((pub) => (
+                  <HistoricalChart 
+                    key={pub.siteId}
+                    title={pub.name}
+                    data={historicalData?.historicalData?.[String(pub.siteId)] || []}
+                    color={PUBLICATION_COLORS[pub.domain] || ACCENT}
+                    showTarget={false}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="publications" className="space-y-6">
