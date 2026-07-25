@@ -109,7 +109,7 @@ export async function GET() {
   try {
     const weeks = getWeeks(52)
     const siteIds = publications.map(p => p.siteId)
-    const allHistoricalData = {}
+    const allHistoricalData: Record<number, any[]> = {}
     
     const siteDataPromises = siteIds.map(siteId => 
       getSiteHistoricalData(siteId, weeks)
