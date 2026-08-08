@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { publications } from '@/lib/publications'
+import { applyFreeSubscriberFilters } from '@/lib/queries'
 
 export const dynamic = 'force-static'
 export const revalidate = 300
@@ -75,25 +76,26 @@ export async function GET() {
           { count: newThisMonth },
           { count: last30Days }
         ] = await Promise.all([
-          supabase
-            .from('members')
-            .select('*', { count: 'exact', head: true })
-            .eq('site_id', pub.siteId)
-            .eq('status', 'free'),
+          applyFreeSubscriberFilters(
+            supabase
+              .from('members')
+              .select('*', { count: 'exact', head: true })
+              .eq('site_id', pub.siteId)
+          ),
 
-          supabase
-            .from('members')
-            .select('*', { count: 'exact', head: true })
-            .eq('site_id', pub.siteId)
-            .eq('status', 'free')
-            .gte('created_at', monthStart.toISOString()),
+          applyFreeSubscriberFilters(
+            supabase
+              .from('members')
+              .select('*', { count: 'exact', head: true })
+              .eq('site_id', pub.siteId)
+          ).gte('created_at', monthStart.toISOString()),
 
-          supabase
-            .from('members')
-            .select('*', { count: 'exact', head: true })
-            .eq('site_id', pub.siteId)
-            .eq('status', 'free')
-            .gte('created_at', last30.toISOString())
+          applyFreeSubscriberFilters(
+            supabase
+              .from('members')
+              .select('*', { count: 'exact', head: true })
+              .eq('site_id', pub.siteId)
+          ).gte('created_at', last30.toISOString())
         ])
 
         const { data: targetRow, error: targetError } = await supabase
@@ -125,30 +127,32 @@ export async function GET() {
     )
 
     const [{ count: totalCurrent }, { count: totalNewThisMonth }, { count: totalLast30Days }] = await Promise.all([
-      supabase
-        .from('members')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'free'),
+      applyFreeSubscriberFilters(
+        supabase
+          .from('members')
+          .select('*', { count: 'exact', head: true })
+      ),
 
-      supabase
-        .from('members')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'free')
-        .gte('created_at', monthStart.toISOString()),
+      applyFreeSubscriberFilters(
+        supabase
+          .from('members')
+          .select('*', { count: 'exact', head: true })
+      ).gte('created_at', monthStart.toISOString()),
 
-      supabase
-        .from('members')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'free')
-        .gte('created_at', last30.toISOString())
+      applyFreeSubscriberFilters(
+        supabase
+          .from('members')
+          .select('*', { count: 'exact', head: true })
+      ).gte('created_at', last30.toISOString())
     ])
 
     const siteTimeSeriesDataPromises = publications.map(async (pub) => {
-      const { data: siteRecords } = await supabase
-        .from('members')
-        .select('created_at')
-        .eq('status', 'free')
-        .eq('site_id', pub.siteId)
+      const { data: siteRecords } = await applyFreeSubscriberFilters(
+        supabase
+          .from('members')
+          .select('created_at')
+          .eq('site_id', pub.siteId)
+      )
         .gte('created_at', last30.toISOString())
         .order('created_at', { ascending: true })
 
