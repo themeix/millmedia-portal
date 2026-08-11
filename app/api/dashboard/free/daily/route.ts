@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { publications } from '@/lib/publications'
-import { applyFreeSubscriberFilters } from '@/lib/queries'
+import { applyFreeSubscriberFilters, fetchAllRows } from '@/lib/queries'
 
 export const dynamic = 'force-static'
 export const revalidate = 300
@@ -147,14 +147,16 @@ export async function GET() {
     ])
 
     const siteTimeSeriesDataPromises = publications.map(async (pub) => {
-      const { data: siteRecords } = await applyFreeSubscriberFilters(
-        supabase
-          .from('members')
-          .select('created_at')
-          .eq('site_id', pub.siteId)
+      const siteRecords = await fetchAllRows(() =>
+        applyFreeSubscriberFilters(
+          supabase
+            .from('members')
+            .select('created_at')
+            .eq('site_id', pub.siteId)
+        )
+          .gte('created_at', last30.toISOString())
+          .order('created_at', { ascending: true })
       )
-        .gte('created_at', last30.toISOString())
-        .order('created_at', { ascending: true })
 
       return { siteId: String(pub.siteId), data: generateTimeSeries(siteRecords) }
     })

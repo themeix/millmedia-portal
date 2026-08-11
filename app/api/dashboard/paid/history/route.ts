@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { publications } from '@/lib/publications'
+import { fetchAllRows } from '@/lib/queries'
 
 function getWeeks(weeksCount: number) {
   const now = new Date()
@@ -53,16 +54,16 @@ async function getSiteHistoricalData(siteId: number, weeks: any[]) {
     .lt('created_at', startDate)
   
   // Get all members created during the 52-week period
-  const { data: members, error } = await supabase
-    .from('paying_members')
-    .select('created_at')
-    .eq('site_id', siteId)
-    .gte('created_at', startDate)
-    .order('created_at', { ascending: true })
+  const members = await fetchAllRows(() =>
+    supabase
+      .from('paying_members')
+      .select('created_at')
+      .eq('site_id', siteId)
+      .gte('created_at', startDate)
+      .order('created_at', { ascending: true })
+  )
   
-  if (error) throw error
-  
-  return aggregateWeeklyData(weeks, members || [], baselineCount || 0)
+  return aggregateWeeklyData(weeks, members, baselineCount || 0)
 }
 
 async function getAllSitesHistoricalData(weeks: any[]) {
@@ -75,13 +76,13 @@ async function getAllSitesHistoricalData(weeks: any[]) {
     .lt('created_at', startDate)
   
   // Get all members created during the 52-week period
-  const { data: members, error } = await supabase
-    .from('paying_members')
-    .select('created_at')
-    .gte('created_at', startDate)
-    .order('created_at', { ascending: true })
-  
-  if (error) throw error
+  const members = await fetchAllRows(() =>
+    supabase
+      .from('paying_members')
+      .select('created_at')
+      .gte('created_at', startDate)
+      .order('created_at', { ascending: true })
+  )
   
   let cumulativeCount = baselineCount || 0
   return weeks.map((week, index) => {

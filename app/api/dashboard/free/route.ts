@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { publications } from '@/lib/publications'
-import { applyFreeSubscriberFilters } from '@/lib/queries'
+import { applyFreeSubscriberFilters, fetchAllRows } from '@/lib/queries'
 
 export const dynamic = 'force-static'
 export const revalidate = 300
@@ -52,7 +52,7 @@ export async function GET() {
       })
     )
 
-    const [{ count: totalCurrent }, { count: totalNewThisMonth }, { count: totalLast30Days }, { data: dailyRecords }] = await Promise.all([
+    const [{ count: totalCurrent }, { count: totalNewThisMonth }, { count: totalLast30Days }] = await Promise.all([
       applyFreeSubscriberFilters(
         supabase
           .from('members')
@@ -69,29 +69,29 @@ export async function GET() {
         supabase
           .from('members')
           .select('*', { count: 'exact', head: true })
-      ).gte('created_at', last30.toISOString()),
+      ).gte('created_at', last30.toISOString())
+    ])
 
+    const dailyRecords = await fetchAllRows(() =>
       applyFreeSubscriberFilters(
         supabase
           .from('members')
           .select('created_at')
       ).gte('created_at', last30.toISOString())
-    ])
+    )
 
     const dailyCounts: Record<string, number> = {}
     const weeklyCounts: Record<string, number> = {}
-    if (dailyRecords) {
-      for (const record of dailyRecords) {
-        const date = new Date(record.created_at)
-        const dateStr = date.toISOString().split('T')[0]
-        
-        dailyCounts[dateStr] = (dailyCounts[dateStr] || 0) + 1
-        
-        const weekStart = new Date(date)
-        weekStart.setDate(date.getDate() - date.getDay())
-        const weekStartStr = weekStart.toISOString().split('T')[0]
-        weeklyCounts[weekStartStr] = (weeklyCounts[weekStartStr] || 0) + 1
-      }
+    for (const record of dailyRecords) {
+      const date = new Date(record.created_at)
+      const dateStr = date.toISOString().split('T')[0]
+      
+      dailyCounts[dateStr] = (dailyCounts[dateStr] || 0) + 1
+      
+      const weekStart = new Date(date)
+      weekStart.setDate(date.getDate() - date.getDay())
+      const weekStartStr = weekStart.toISOString().split('T')[0]
+      weeklyCounts[weekStartStr] = (weeklyCounts[weekStartStr] || 0) + 1
     }
     
     const dailyData = []

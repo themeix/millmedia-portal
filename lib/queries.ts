@@ -15,3 +15,25 @@ export function applyFreeSubscriberFilters(query: any) {
     .is('deleted_at', null)
     .or('email_suppressed.eq.false,email_suppressed.is.null')
 }
+
+// Supabase caps REST responses at 1000 rows per request.
+// This paginates through all matching rows by calling buildQuery()
+// (which must return a FRESH query builder each call) in batches.
+export async function fetchAllRows<T = any>(
+  buildQuery: () => any,
+  batchSize = 1000
+): Promise<T[]> {
+  const allRows: T[] = []
+  let offset = 0
+
+  while (true) {
+    const { data, error } = await buildQuery().range(offset, offset + batchSize - 1)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    allRows.push(...data)
+    if (data.length < batchSize) break
+    offset += batchSize
+  }
+
+  return allRows
+}

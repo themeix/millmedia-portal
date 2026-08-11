@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { PUBLICATION_CONFIG, getPublicationName } from '@/lib/config'
+import { fetchAllRows } from '@/lib/queries'
 
 export async function GET() {
   try {
@@ -77,17 +78,19 @@ export async function GET() {
     const historicalStart = months[0].start.toISOString()
     const historicalEnd = months[months.length - 1].end.toISOString()
     
-    const { data: historicalMembers } = await supabase
-      .from('paying_members')
-      .select('created_at')
-      .gte('created_at', historicalStart)
-      .lt('created_at', historicalEnd)
+    const historicalMembers = await fetchAllRows(() =>
+      supabase
+        .from('paying_members')
+        .select('created_at')
+        .gte('created_at', historicalStart)
+        .lt('created_at', historicalEnd)
+    )
     
     const historicalData = months.map(month => {
-      const monthCount = historicalMembers?.filter(member => {
+      const monthCount = historicalMembers.filter(member => {
         const memberDate = new Date(member.created_at)
         return memberDate >= month.start && memberDate < month.end
-      }).length || 0
+      }).length
       
       return {
         month: month.key,
